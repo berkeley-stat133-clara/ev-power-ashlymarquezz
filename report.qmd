@@ -8,27 +8,120 @@ format: typst
 ## **Part 0: libraries**
 
 ```{r}
-
+library(tidyverse)
+library(sf)
+library(rnaturalearth)
 ```
 
 ## **Part 1:** **Defining Research Question**
 
-Chosen Question:
+Chosen Question: What state has the highest total energy use from 2021 to 2023?
 
 ## **Part 2: Data Preparation and Cleaning**
 
 ```{r}
+new_names <- function(df) {
+    n <- names(df)
+    n <- str_replace_all(n, "[^A-Za-z0-9]+", "_")
+    n <- str_replace_all(n, "_+", "_")
+    names(df) <- n
+    df
+}
+new_state <- function(x) {
+    x <- str_replace_all(x, "\\.", "")
+    x<- str_replace_all(x, "^\\s+|\\s+$", "")
+    x <- str_replace_all(x, "(?i)^dc$", "District of Columbia")
+    x <- str_replace_all(x,"(?i)^washington dc$", "District of Columbia")
+    x
+}
+read_clean <- function(fname) {
+    read_csv(fname, show_col_types = FALSE) |> new_names() 
+    sc <- which(stringr::str_detect(names(df), "(^|_)state(_|$)"))
+  if (length(sc) == 0) return(df)
+  names(df)[sc[1]] <- "state"
+  df |> mutate(state = new_state(state))
+}
 
+total_2021 <- read_clean("data/total-use-2021.csv")
+total_2022 <- read_clean("data/total-use-2022.csv")
+total_2023 <- read_clean("data/total-use-2023.csv")
+renew_2021 <- read_clean("data/renew-use-2021.csv")
+renew_2022 <- read_clean("data/renew-use-2022.csv")
+renew_2023 <- read_clean("data/renew-use-2023.csv")
+av_price <- read_clean("data/av-energy-price-2021-2023.csv")
+ev <- read_clean("data/ev-registrations-by-state-2023.csv")
 ```
 
 ## **Part 3: Joining / Pivoting Datasets for Analysis**
 
 ```{r}
+new_names <- function(df) {
+    n <- names(df)
+    n <- str_replace_all(n, "[^A-Za-z0-9]+", "_")
+    n <- str_replace_all(n, "_+", "_")
+    names(df) <- n
+    df
+}
+read_clean <- function(fname) {
+    read_csv(fname, show_col_types = FALSE) |> new_names() 
+}
+total_2021 <- read_clean("data/total-use-2021.csv")
+total_2022 <- read_clean("data/total-use-2022.csv")
+total_2023 <- read_clean("data/total-use-2023.csv")
+renew_2021 <- read_clean("data/renew-use-2021.csv")
+renew_2022 <- read_clean("data/renew-use-2022.csv")
+renew_2023 <- read_clean("data/renew-use-2023.csv")
+ 
+ total_years <- bind_rows(
+    total_2021 |> mutate(year = 2021), 
+    total_2022|> mutate(year = 2022), 
+    total_2023 |> mutate(year = 2023)
+)
+
+renew_all <- bind_rows(
+    renew_2021 |> mutate(year= 2021),
+    renew_2022 |> mutate(year= 2022),
+    renew_2023 |> mutate(year= 2023)
+)
+
+energy_join <- left_join (total_years, renew_all, by =c("Energy_Source", "year"))
+
+
+total_sum <- total_years |>
+    summarize(across(-Energy_Source, sum, na.rm= TRUE))
+   
+top_state <- total_sum |>
+     summarize(across(everything(), max, na.rm = TRUE))
+top_state
+
 
 ```
 
 ## **Part 4: Mapping Visualization**
 
 ```{r}
+us_states <- ne_states(country = "united states of america", returnclass = "sf")
 
+total_wide <- total_years |>
+    select(-Energy_Source, -year, -US) |>
+    summarize(across(everything(), ~sum(as.numeric(.x), na.rm= TRUE)))
+
+energy_data <- total_wide |>
+    t() |> as.data.frame() |>
+    rownames_to_column("state_abbr") |>
+    rename(total_energy= V1) |>
+    mutate (name= state.name[match(state_abbr, state.abb)]) |>
+    select(name, total_energy) |>
+    filter(!is.na(name))
+us_joined <- us_states |>
+    left_join(energy_data, by = "name")
+ggplot(us_joined) +
+    geom_sf(aes(fill= total_energy), color= "pink") +
+    scale_fill_continuous(name= "Total Energy (2021-2023)", na.value = "grey90") +
+     labs(title = "Total Energy Use by U.S. State (2021-2023)") +
+     coord_sf(xlim = c(-125, -66), ylim = c(24, 50), expand = FALSE) +
+  theme_minimal()
 ```
+
+Part 5: Final Deliverable
+The patterns I noticed were that bigger states such as California and Texas used more energy while smaller states like Rhode Island and Vermont used less. My map helps answer the main research question as it shows the differences in industrial activity and population size, helping identify which states used the most energy between 2021 and 2023. 
